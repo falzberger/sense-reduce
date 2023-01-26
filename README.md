@@ -7,7 +7,7 @@ Minimum Supported Python Version: 3.9
 
 ## Architectural Overview
 
-![SenseReduce Architecture](docs/img/architecture.png)
+![SenseReduce Architecture](docs/img/architecture_overview.png)
 
 The repository consists of multiple smaller modules:
 
