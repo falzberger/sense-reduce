@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Download data from ZAMG API, see https://dataset.api.hub.zamg.ac.at/v1/docs/index.html
+# Download data from ZAMG API, cf. https://dataset.api.hub.zamg.ac.at/v1/docs/index.html
 # Due to server limitations, we download the data in three parts for each station
 
 curl -X 'GET' \

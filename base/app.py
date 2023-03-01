@@ -8,8 +8,8 @@ import tensorflow as tf
 from flask import request, send_file
 
 from base import app
-from base.learning_strategy import NoUpdateStrategy
 from base.deployment_strategy import DeployOnceStrategy
+from base.learning_strategy import NoUpdateStrategy
 from base.model import Model
 from base.node_manager import NodeManager
 from common import ThresholdMetric
@@ -66,8 +66,7 @@ def post_violation(node_id: str):
     dt = datetime.fromisoformat(body['timestamp'])
 
     new_model = node_manager.on_threshold_violation(node_id, dt, body['measurement'], pd.read_json(body['data']))
-    # TODO: must be handled by sensor implementation
-    return {'update': False if new_model is None else True}, 201
+    return {'model_metadata': None if new_model is None else new_model.to_dict()}, 201
 
 
 @app.post("/update/<string:node_id>")
@@ -78,8 +77,7 @@ def post_update(node_id: str):
     dt = datetime.fromisoformat(body['timestamp'])
 
     new_model = node_manager.on_horizon_update(node_id, dt, pd.read_json(body['data']))
-    # TODO: must be handled by sensor implementation
-    return {'update': False if new_model is None else True}, 201
+    return {'model_metadata': None if new_model is None else new_model.to_dict()}, 201
 
 
 @app.post("/measurement/<string:node_id>")

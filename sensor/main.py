@@ -15,120 +15,283 @@ from predicting_monitor import PredictingMonitor
 logging.basicConfig(level=logging.DEBUG)
 
 
-def run(threshold_metric: ThresholdMetric, base: str, mode: str, wifi_toggle: bool, interval_seconds: float):
-    """Starts running a sensor node in SenseReduce that will register at the base station and start monitoring.
+def run(threshold_metric: ThresholdMetric,
+        base_address: str,
+        data_reduction_mode: str,
+        wifi_toggle: bool,
+        check_interval: float,
+        ) -> None:
+    """Starts a sensor node in SenseReduce, which connects to a base station and starts monitoring.
 
     Args:
-        threshold_metric: The defined threshold metric for the sensor node.
-        base: The address of the base station, e.g., 192.168.0.1:100.
-        mode: The mode applied for data reduction, either 'none' or 'predict'.
-        wifi_toggle: A flag whether Wi-Fi should be turned off in-between transmissions.
-        interval_seconds: Defines the regular checking interval in seconds.
+        threshold_metric (ThresholdMetric): The metric used to determine if a threshold has been reached.
+        base_address (str): The address of the base station, e.g., "192.168.0.1:100".
+        data_reduction_mode (str): The data reduction mode applied, either "none" or "predict".
+        wifi_toggle (bool): A flag indicating whether Wi-Fi should be turned off between transmissions.
+        check_interval (float): The regular interval in seconds for checking the sensor's readings.
+
+    Returns:
+        None
+
+    Raises:
+        ValueError: If an invalid data reduction mode is specified.
     """
-    logging.info(
-        f'Starting sensor node with ID={NODE_ID} in "{mode}" mode, threshold={threshold_metric} and base={base}...'
-    )
+
+    logging.info(f'Starting sensor node with ID={NODE_ID} in "{data_reduction_mode}" mode, '
+                 f'threshold={threshold_metric} and base={base_address}...'
+                 )
     sensor = TemperatureSensor()
 
-    if mode == 'none':
-        register_node(base, threshold_metric)
+    if data_reduction_mode == 'none':
+        register_node(base_address, threshold_metric)
         while True:
-            now = datetime.datetime.now()
-            send_measurement(now, sensor.measurement.values, base)
-            time.sleep(interval_seconds)
+            current_time = datetime.datetime.now()
+            send_measurement(current_time, sensor.measurement.values, base_address)
+            time.sleep(check_interval)
 
-    elif mode == 'predict':
-        model, data = fetch_model_and_data(base, threshold_metric)
+    elif data_reduction_mode == 'predict':
+        model, data = fetch_model_and_data(base_address, threshold_metric)
         predictor = Predictor(model, data)
         predictor.update_prediction_horizon(datetime.datetime.now())
         monitor = PredictingMonitor(sensor, predictor)
 
         monitor.monitor(threshold_metric=threshold_metric,
-                        interval_seconds=interval_seconds,
-                        violation_callback=functools.partial(wifi_wrapper, wifi_toggle, send_violation, base=base),
-                        update_callback=functools.partial(wifi_wrapper, wifi_toggle, send_update, base=base)
+                        interval_seconds=check_interval,
+                        violation_callback=functools.partial(wifi_wrapper,
+                                                             wifi_toggle,
+                                                             send_violation,
+                                                             base_address=base_address,
+                                                             monitor=monitor,
+                                                             ),
+                        update_callback=functools.partial(wifi_wrapper,
+                                                          wifi_toggle,
+                                                          send_update,
+                                                          base_address=base_address,
+                                                          monitor=monitor,
+                                                          )
                         )
 
     else:
-        logging.error(f'Unsupported data reduction mode: {mode}')
-        exit(1)
+        raise ValueError(f'Unsupported data reduction mode: {data_reduction_mode}')
 
 
-def register_node(base: str, threshold_metric: ThresholdMetric) -> requests.Response:
-    """Registers the node at the base station by informing it about the node id and the threshold metric.
+def register_node(base_address: str, threshold_metric: ThresholdMetric) -> requests.Response:
+    """Registers the sensor node with the base station by providing its ID and threshold metric.
+
+    Args:
+        base_address: The address of the base station, e.g., "192.168.0.1:100".
+        threshold_metric: The metric used to determine if a threshold has been reached.
 
     Returns:
-        The request's response, containing model metadata and initial data in the body.
+        requests.Response: The response from the base station containing metadata and initial data in the body.
+
+    Raises:
+        requests.exceptions.RequestException: If an error occurs while sending the request.
     """
-    body = {
-        'threshold_metric': threshold_metric.to_dict()
-    }
-    logging.debug(f'Node {NODE_ID} registering with: {body}')
-    return requests.post(f'{base}/register/{NODE_ID}', json=body)
+    body = {'threshold_metric': threshold_metric.to_dict()}
+    logging.debug(f'Registering node {NODE_ID} with base station at {base_address}: {body}')
+    try:
+        response = requests.post(f'{base_address}/register/{NODE_ID}', json=body)
+        response.raise_for_status()
+        return response
+    except requests.exceptions.RequestException as e:
+        logging.error(f'Registration failed: {e}')
+        raise
 
 
-def fetch_model_and_data(base: str, threshold_metric: ThresholdMetric) -> (LiteModel, DataStorage):
-    body = register_node(base, threshold_metric).json()
+def fetch_model_and_data(base_address: str, threshold_metric: ThresholdMetric) -> (LiteModel, DataStorage):
+    """Fetches the prediction model and initial data from the base station.
 
-    metadata = ModelMetadata.from_dict(body.get('model_metadata'))
-    r = requests.get(f'{base}/models/{NODE_ID}')
-    file_name = f'{metadata.uuid}.tflite'
-    open(file_name, 'wb').write(r.content)
+    Args:
+        base_address: The address of the base station, e.g., "192.168.0.1:100".
+        threshold_metric: The metric used to determine if a threshold has been reached.
 
-    initial_df = pd.read_json(body.get('initial_df'))
-    logging.debug(f'Node {NODE_ID} fetched initial data for prediction model: {initial_df}')
-    data = DataStorage(metadata.input_features, metadata.output_features)
-    data.add_measurement_df(initial_df)
+    Returns:
+        A tuple with the prediction model loaded from a TensorFlow Lite file and the initial data used to train it.
 
-    return LiteModel.from_tflite_file(file_name, metadata), data
+    Raises:
+        requests.exceptions.RequestException: If an error occurs while sending the request or loading the model.
+    """
+    try:
+        # Register the node to receive model metadata and initial data
+        response = register_node(base_address, threshold_metric)
+        body = response.json()
+
+        # Download the model file from the base station and load it into a LiteModel object
+        metadata = ModelMetadata.from_dict(body.get('model_metadata'))
+        model = fetch_model(base_address, metadata)
+
+        # Load the initial data into a DataStorage object
+        initial_df = pd.read_json(body.get('initial_df'))
+        logging.debug(f'Node {NODE_ID} fetched initial data for prediction model: {initial_df}')
+        data = DataStorage(metadata.input_features, metadata.output_features)
+        data.add_measurement_df(initial_df)
+
+        return model, data
+
+    except (requests.exceptions.RequestException, ValueError) as e:
+        logging.error(f'Failed to fetch prediction model and data from base station: {e}')
+        raise
+
+
+def fetch_model(base_address: str, model_metadata: ModelMetadata) -> LiteModel:
+    """Fetches the prediction model from the base station.
+
+    Args:
+        base_address: The address of the base station, e.g., "192.168.0.1:100".
+        model_metadata: The metadata of the model to fetch.
+
+    Returns:
+        The prediction model loaded from a TensorFlow Lite file.
+
+    Raises:
+        requests.exceptions.RequestException: If an error occurs while sending the request or loading the model.
+    """
+    try:
+        r = requests.get(f'{base_address}/models/{NODE_ID}')
+        file_name = f'{model_metadata.uuid}.tflite'
+        open(file_name, 'wb').write(r.content)
+        return LiteModel.from_tflite_file(file_name, model_metadata)
+    except requests.exceptions.RequestException as e:
+        logging.error(f'Failed to fetch prediction model from base station {base_address}: {e}')
+        raise
 
 
 def wifi_wrapper(wifi_toggle: bool, func, *args, **kwargs):
+    """
+    Wrapper function that handles toggling Wi-Fi before and after a function call.
+    If `wifi_toggle` is True, Wi-Fi is turned on before the function call and off after it.
+    The function call is executed regardless of the `wifi_toggle` setting.
+    """
     if wifi_toggle:
         os.system('sudo rfkill unblock wifi')
-        # TODO: improve busy waiting of Wi-Fi toggling
-        # TODO: use a more reliable way to check if Wi-Fi is connected
-        before = time.time_ns()
-        busy_waiting = True
-        while busy_waiting:
-            try:
-                requests.get('http://192.168.8.110:5000/ping')
-                busy_waiting = False
-            except:
-                pass
-        print(f'Took {time.time_ns() - before} ns to establish connection')
+        # wait for Wi-Fi to connect
+        base_url = kwargs.get('base', 'http://192.168.8.110:5000')
+        wait_for_wifi(base_url)
     func(*args, **kwargs)
     if wifi_toggle:
         os.system('sudo rfkill block wifi')
 
 
-def send_measurement(dt: datetime.datetime, measurement: np.ndarray, base: str):
+def wait_for_wifi(base_url: str, timeout: int = 30):
+    """
+    Waits for the Wi-Fi to connect to the base station.
+    """
+    start_time = time.monotonic()
+    while True:
+        try:
+            r = requests.get(f'{base_url}/ping')
+            if r.ok:
+                end_time = time.monotonic()
+                logging.debug(f'Connected to {base_url} in {end_time - start_time} seconds')
+                return
+        except requests.exceptions.RequestException:
+            pass
+        elapsed_time = time.monotonic() - start_time
+        if elapsed_time >= timeout:
+            logging.warning(f'Timed out waiting for Wi-Fi to connect to {base_url}')
+            return
+        time.sleep(0.5)  # wait 0.5 second before retrying
+
+
+def send_measurement(dt: datetime.datetime, measurement: np.ndarray, base_address: str):
+    """Sends a single measurement to the specified base address.
+
+    Args:
+        dt: The measurement's timestamp as a datetime object.
+        measurement: The measurement as a NumPy array.
+        base_address: The address of the base station to send the measurement to.
+
+    Raises:
+        requests.exceptions.RequestException: An error occurred while sending the measurement.
+
+    """
     body = {
         'timestamp': dt.isoformat(),
         'measurement': list(measurement),
     }
     logging.debug(f'Node {NODE_ID} sending measurement: {body}')
-    requests.post(f'{base}/measurement/{NODE_ID}', json=body)
+    try:
+        response = requests.post(f'{base_address}/measurement/{NODE_ID}', json=body)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        logging.error(f'Error sending measurement: {e}')
+        raise e
 
 
-def send_update(dt: datetime.datetime, data: pd.DataFrame, base: str):
+def send_update(dt: datetime.datetime, data: pd.DataFrame, base_address: str, monitor: PredictingMonitor):
+    """Communicates a horizon update to the specified base address.
+
+    Args:
+        dt: The timestamp at which the horizon udpate is necessary a datetime object.
+        data: The (redcued) measurements that occured in the current prediction horizon as a NumPy array.
+        base_address: The address of the base station.
+        monitor: The monitor that is used for prediction-based the reduction.
+
+    Raises:
+        requests.exceptions.RequestException: An error occurred while sending the horizon update.
+
+    """
     body = {
         'timestamp': dt.isoformat(),
         'data': data.to_json(),
     }
-    logging.debug(f'Node {NODE_ID} sending update: {body}')
-    requests.post(f'{base}/update/{NODE_ID}', json=body)
+    logging.debug(f'Node {NODE_ID} sending horizon update: {body}')
+
+    try:
+        response = requests.post(f'{base_address}/update/{NODE_ID}', json=body)
+        response.raise_for_status()
+
+        body = response.json()
+        model_metadata = body.get('model_metadata')
+        if model_metadata is not None:
+            model_metadata = ModelMetadata.from_dict(model_metadata)
+            model = fetch_model(base_address, model_metadata)
+
+            new_predictor = Predictor(model, monitor.predictor.data)
+            new_predictor.update_prediction_horizon(dt)
+            monitor.predictor = new_predictor
+
+    except requests.exceptions.RequestException as e:
+        logging.error(f'Error sending horizon update: {e}')
+        raise e
 
 
-def send_violation(dt: datetime.datetime, measurement: np.ndarray, data: pd.DataFrame, base: str):
+def send_violation(dt: datetime.datetime,
+                   measurement: np.ndarray,
+                   data: pd.DataFrame,
+                   base_address: str,
+                   monitor: PredictingMonitor
+                   ):
+    """
+    Sends a violation message to the base station, containing the timestamp of the violation, the measurement that
+    triggered it, and the data required for updating the prediction horizon.
+    """
     body = {
         'timestamp': dt.isoformat(),
         'measurement': list(measurement),
         'data': data.to_json(),
     }
     logging.debug(f'Node {NODE_ID} handling violation by sending: {body}')
-    requests.post(f'{base}/violation/{NODE_ID}', json=body)
-    # TODO: handle response that may contain a new model
+
+    try:
+        response = requests.post(f'{base_address}/violation/{NODE_ID}', json=body)
+        response.raise_for_status()
+
+        body = response.json()
+
+        model_metadata = body.get('model_metadata')
+        if model_metadata is not None:
+            model_metadata = ModelMetadata.from_dict(model_metadata)
+            model = fetch_model(base_address, model_metadata)
+
+            new_predictor = Predictor(model, monitor.predictor.data)
+            new_predictor.update_prediction_horizon(dt)
+            monitor.predictor = new_predictor
+
+    except requests.exceptions.RequestException as e:
+        logging.error(f'Error sending horizon update: {e}')
+        raise e
 
 
 if __name__ == '__main__':

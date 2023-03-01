@@ -13,19 +13,8 @@ The repository consists of multiple smaller modules:
 
 - `base`: comprises the base station logic, including model training
 - `common`: shared functionality between sensor nodes and base station
-- `sensor`: code for sensor nodes
+- `sensor`: code for sensor nodes, including the sensor implementations ([details](sensor/README.md))
 - `simulation`: Jupyter notebooks for running simulations with the framework
-
-### Known Limitations
-
-The framework targets two-dimensional time series data. Sequential image data is not supported. However, predictions
-with more than one target attribute (e.g., predicting temperature *and* humidity simultaneously) are possible.
-
-## Contributing
-
-The repository contains multiple TODOs in the source code that would be open for any contribution and are not reflected
-in the form of Github issues (yet). If you have an idea for further improvement, please open an issue to discuss it in
-detail. In case you want to contribute directly, open a pull request, and we will review it as soon as possible.
 
 ## Parameter Study
 
@@ -46,6 +35,17 @@ Then, run the jupyter notebooks to preprocess the data and generate the required
 
 Finally, run the [simulation notebook](simulation/zamg/zamg_simulations.ipynb) to compute all parameter study results
 and use the [analysis](simulation/simulation_analysis.ipynb) notebook to visualize the results.
+
+### Known Limitations
+
+The framework targets two-dimensional time series data. Sequential image data is not supported. However, predictions
+with more than one target attribute (e.g., predicting temperature *and* humidity simultaneously) are possible.
+
+## Contributing
+
+The repository contains multiple TODOs in the source code that would be open for any contribution and are not reflected
+in the form of GitHub issues (yet). If you have an idea for further improvement, please open an issue to discuss it in
+detail. In case you want to contribute directly, open a pull request, and we will review it as soon as possible.
 
 ## Raspberry Pi Setup
 
@@ -75,7 +75,6 @@ dtoverlay=disable-bt
 And adapt the following settings already in the file:
 
 ```text
-
 # Disable audio
 dtparam=audio=off
 

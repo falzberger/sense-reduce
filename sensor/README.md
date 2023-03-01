@@ -3,21 +3,15 @@
 This module contains the implementation for sensor nodes in the SenseReduce framework.
 To sensor must implement the `AbstractSensor` interface to return a list of measurements.
 
-## Hardware Setup
-
-Multiple temperature sensors are supported out-of-the-box (
-SenseHat, [DHT22](https://tutorials-raspberrypi.com/raspberry-pi-measure-humidity-temperature-dht11-dht22/), DS18B20).
-You can test a sensor by executing `python3 temperature_sensor_<sensor>.py`, which will start continuously
-monitoring and printing measurements to the console.
-
 ## Development
 
-To run a sensor node within the SenseReduce framework, start by creating and activating a virtual environment.
+To run a sensor node within the SenseReduce framework, start by creating and activating a virtual environment for its
+required dependencies.
 
 ```bash
 python3 -m venv venv
 . venv/bin/activate
-# install the minimum requirements, might need additional packages to run the sensor
+# install the minimum requirements, might need additional packages to run the applied sensor
 pip3 install -r requirements.txt
 ```
 
@@ -36,3 +30,12 @@ For example:
 ```bash
 python3 main.py sense-hat http://192.168.8.110:5000 --mode predict --interval 10 --threshold 2 
 ```
+
+## Hardware Setup
+
+Multiple temperature sensors are supported out-of-the-box (
+[SenseHat](https://www.raspberrypi.com/documentation/accessories/sense-hat.html),
+[DHT22](https://tutorials-raspberrypi.com/raspberry-pi-measure-humidity-temperature-dht11-dht22/),
+[DS18B20](https://tutorials-raspberrypi.com/raspberry-pi-temperature-sensor-1wire-ds18b20/)).
+You can test a sensor by executing `python3 temperature_sensor_<sensor>.py`, which will start continuously
+monitoring and printing measurements to the console.
